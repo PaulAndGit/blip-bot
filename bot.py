@@ -3,6 +3,8 @@
 import json
 import logging
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -85,10 +87,27 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Всего скачиваний: {s['downloads']}")
 
 
+class _Health(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args):  # noqa: A003
+        pass
+
+
+def start_health_server() -> None:
+    """Мини-HTTP-сервер для health-check Render (порт из переменной PORT)."""
+    port = int(os.environ.get("PORT", 10000))
+    HTTPServer(("0.0.0.0", port), _Health).serve_forever()
+
+
 def main() -> None:
     token = os.environ.get("BOT_TOKEN")
     if not token:
         raise SystemExit("BOT_TOKEN не задан (переменная окружения)")
+    threading.Thread(target=start_health_server, daemon=True).start()
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
