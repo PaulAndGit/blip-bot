@@ -1,23 +1,30 @@
 """Бот Blip VPN: выдаёт APK и инструкцию по установке."""
 
+import io
 import json
 import logging
 import os
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-# Ссылка на arm64-версию APK (GitHub Release). Файл на сервере не хранится.
+# Ссылка на arm64-версию APK (GitHub Release).
 APK_URL = os.environ.get(
     "APK_URL",
     "https://github.com/PaulAndGit/blip-policy/releases/download/v1.0/blip-vpn-1.0-arm64.apk",
 )
+APK_FILENAME = "blip-vpn-1.0-arm64.apk"
 DATA_FILE = Path("data.json")
+
+# APK скачивается при старте в память и отправляется загрузкой файла,
+# а не по URL: Telegram на своих серверах не всегда может скачать с GitHub.
+_APK_BYTES: bytes | None = None
 
 INSTRUCTIONS = """📲 Как установить Blip VPN
 
@@ -47,6 +54,22 @@ APK_CAPTION = """📦 Blip VPN v1.0
 Подробная инструкция — в разделе «Инструкция»."""
 
 
+def download_apk() -> bytes | None:
+    """Скачивает APK в память. None — если не получилось."""
+    try:
+        req = urllib.request.Request(APK_URL, headers={"User-Agent": "BlipBot/1.0"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            data = r.read()
+        if not data.startswith(b"PK"):
+            logging.error("APK: ответ не похож на zip (%d байт)", len(data))
+            return None
+        logging.info("APK скачан: %d байт", len(data))
+        return data
+    except Exception as e:  # noqa: BLE001
+        logging.error("APK не скачан: %s", e)
+        return None
+
+
 def load_stats() -> dict:
     if DATA_FILE.exists():
         try:
@@ -71,15 +94,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global _APK_BYTES
     query = update.callback_query
     await query.answer()
-    if query.data == "apk":
+    try:
+        if query.data == "help":
+            await query.message.reply_text(INSTRUCTIONS)
+            return
+        if query.data != "apk":
+            return
         stats = load_stats()
         stats["downloads"] += 1
         save_stats(stats)
-        await query.message.reply_document(document=APK_URL, caption=APK_CAPTION)
-    elif query.data == "help":
-        await query.message.reply_text(INSTRUCTIONS)
+        if _APK_BYTES is None:
+            _APK_BYTES = download_apk()
+        if _APK_BYTES is not None:
+            await query.message.reply_document(
+                document=InputFile(io.BytesIO(_APK_BYTES), filename=APK_FILENAME),
+                caption=APK_CAPTION,
+            )
+        else:
+            # Фолбэк: не смогли отправить файл — даём прямую ссылку.
+            await query.message.reply_text(
+                "⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL
+            )
+    except Exception as e:  # noqa: BLE001
+        logging.exception("Ошибка отправки APK")
+        try:
+            await query.message.reply_text(
+                "⚠️ Ошибка отправки файла. Скачайте APK напрямую:\n\n" + APK_URL
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -98,16 +144,18 @@ class _Health(BaseHTTPRequestHandler):
 
 
 def start_health_server() -> None:
-    """Мини-HTTP-сервер для health-check Render (порт из переменной PORT)."""
+    """Мини-HTTP-сервер для health-check хостинга (порт из переменной PORT)."""
     port = int(os.environ.get("PORT", 10000))
     HTTPServer(("0.0.0.0", port), _Health).serve_forever()
 
 
 def main() -> None:
+    global _APK_BYTES
     token = os.environ.get("BOT_TOKEN")
     if not token:
         raise SystemExit("BOT_TOKEN не задан (переменная окружения)")
     threading.Thread(target=start_health_server, daemon=True).start()
+    _APK_BYTES = download_apk()  # скачиваем при старте, чтобы кнопка работала сразу
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
