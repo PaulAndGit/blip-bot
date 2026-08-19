@@ -1,0 +1,23 @@
+name: Bot Diagnostics
+on:
+  workflow_dispatch:
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: getMe (токен валиден?)
+        run: |
+          curl -sS -m 30 "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/getMe"
+          echo
+      - name: getUpdates (ищем чат для теста)
+        run: |
+          RESP=$(curl -sS -m 30 "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/getUpdates")
+          echo "UPDATES: $RESP"
+          CHAT=$(echo "$RESP" | jq -r '.result[0].message.chat.id // empty')
+          echo "CHAT_ID=$CHAT"
+          echo "CHAT_ID=$CHAT" >> "$GITHUB_ENV"
+      - name: sendDocument по URL (проверка скачивания Telegram с GitHub)
+        if: env.CHAT_ID != ''
+        run: |
+          curl -sS -m 180 "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendDocument?chat_id=$CHAT_ID&document=https://github.com/PaulAndGit/blip-policy/releases/download/v1.0/blip-vpn-1.0-arm64.apk"
+          echo
