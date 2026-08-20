@@ -22,9 +22,8 @@ APK_URL = os.environ.get(
 APK_FILENAME = "blip-vpn-1.0-arm64.apk"
 DATA_FILE = Path("data.json")
 
-# APK скачивается при старте в память и отправляется загрузкой файла,
-# а не по URL: Telegram на своих серверах не всегда может скачать с GitHub.
 _APK_BYTES: bytes | None = None
+_APK_LOCK = threading.Lock()
 
 INSTRUCTIONS = """📲 Как установить Blip VPN
 
@@ -58,7 +57,7 @@ def download_apk() -> bytes | None:
     """Скачивает APK в память. None — если не получилось."""
     try:
         req = urllib.request.Request(APK_URL, headers={"User-Agent": "BlipBot/1.0"})
-        with urllib.request.urlopen(req, timeout=120) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:
             data = r.read()
         if not data.startswith(b"PK"):
             logging.error("APK: ответ не похож на zip (%d байт)", len(data))
@@ -68,6 +67,17 @@ def download_apk() -> bytes | None:
     except Exception as e:  # noqa: BLE001
         logging.error("APK не скачан: %s", e)
         return None
+
+
+def ensure_apk() -> bytes | None:
+    """Возвращает байты APK, скачивая при необходимости."""
+    global _APK_BYTES
+    if _APK_BYTES is not None:
+        return _APK_BYTES
+    with _APK_LOCK:
+        if _APK_BYTES is None:
+            _APK_BYTES = download_apk()
+    return _APK_BYTES
 
 
 def load_stats() -> dict:
@@ -94,31 +104,34 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global _APK_BYTES
     query = update.callback_query
     await query.answer()
+    if query.data == "help":
+        await query.message.reply_text(INSTRUCTIONS)
+        return
+    if query.data != "apk":
+        return
+    stats = load_stats()
+    stats["downloads"] += 1
+    save_stats(stats)
     try:
-        if query.data == "help":
-            await query.message.reply_text(INSTRUCTIONS)
-            return
-        if query.data != "apk":
-            return
-        stats = load_stats()
-        stats["downloads"] += 1
-        save_stats(stats)
-        if _APK_BYTES is None:
-            _APK_BYTES = download_apk()
-        if _APK_BYTES is not None:
+        data = ensure_apk()
+        if data is not None:
             await query.message.reply_document(
-                document=InputFile(io.BytesIO(_APK_BYTES), filename=APK_FILENAME),
+                document=InputFile(io.BytesIO(data), filename=APK_FILENAME),
                 caption=APK_CAPTION,
             )
-        else:
-            # Фолбэк: не смогли отправить файл — даём прямую ссылку.
-            await query.message.reply_text(
-                "⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL
-            )
-    except Exception as e:  # noqa: BLE001
+            return
+        try:
+            # Фолбэк: Telegram сам скачает файл по URL.
+            await query.message.reply_document(document=APK_URL, caption=APK_CAPTION)
+            return
+        except Exception:  # noqa: BLE001
+            logging.exception("Отправка по URL не удалась")
+        await query.message.reply_text(
+            "⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL
+        )
+    except Exception:  # noqa: BLE001
         logging.exception("Ошибка отправки APK")
         try:
             await query.message.reply_text(
@@ -150,12 +163,12 @@ def start_health_server() -> None:
 
 
 def main() -> None:
-    global _APK_BYTES
     token = os.environ.get("BOT_TOKEN")
     if not token:
         raise SystemExit("BOT_TOKEN не задан (переменная окружения)")
     threading.Thread(target=start_health_server, daemon=True).start()
-    _APK_BYTES = download_apk()  # скачиваем при старте, чтобы кнопка работала сразу
+    # Загрузка APK в фоне — не блокирует старт polling.
+    threading.Thread(target=ensure_apk, daemon=True).start()
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))

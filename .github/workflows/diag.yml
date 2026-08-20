@@ -1,6 +1,11 @@
 name: Bot Diagnostics
 on:
   workflow_dispatch:
+    inputs:
+      chat_id:
+        description: "ID чата для теста отправки (пусто — только getMe)"
+        required: false
+        default: ""
 jobs:
   diag:
     runs-on: ubuntu-latest
@@ -9,15 +14,13 @@ jobs:
         run: |
           curl -sS -m 30 "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/getMe"
           echo
-      - name: getUpdates (ищем чат для теста)
+      - name: getUpdates (если chat_id не передан)
+        if: inputs.chat_id == ''
         run: |
-          RESP=$(curl -sS -m 30 "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/getUpdates")
-          echo "UPDATES: $RESP"
-          CHAT=$(echo "$RESP" | jq -r '.result[0].message.chat.id // empty')
-          echo "CHAT_ID=$CHAT"
-          echo "CHAT_ID=$CHAT" >> "$GITHUB_ENV"
-      - name: sendDocument по URL (проверка скачивания Telegram с GitHub)
-        if: env.CHAT_ID != ''
+          curl -sS -m 30 "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/getUpdates"
+          echo
+      - name: sendDocument по URL в чат (проверка скачивания Telegram с GitHub)
+        if: inputs.chat_id != ''
         run: |
-          curl -sS -m 180 "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendDocument?chat_id=$CHAT_ID&document=https://github.com/PaulAndGit/blip-policy/releases/download/v1.0/blip-vpn-1.0-arm64.apk"
+          curl -sS -m 180 "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendDocument?chat_id=${{ inputs.chat_id }}&document=https://github.com/PaulAndGit/blip-policy/releases/download/v1.0/blip-vpn-1.0-arm64.apk"
           echo
