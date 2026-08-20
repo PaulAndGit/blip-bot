@@ -53,6 +53,19 @@ APK_CAPTION = """📦 Blip VPN v1.0
 Подробная инструкция — в разделе «Инструкция»."""
 
 
+def main_menu_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📦 Скачать APK", callback_data="apk")],
+            [InlineKeyboardButton("📋 Инструкция", callback_data="help")],
+        ]
+    )
+
+
+def back_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back")]])
+
+
 def download_apk() -> bytes | None:
     """Скачивает APK в память. None — если не получилось."""
     try:
@@ -94,51 +107,49 @@ def save_stats(stats: dict) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    kb = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("📦 Скачать APK", callback_data="apk")],
-            [InlineKeyboardButton("📋 Инструкция", callback_data="help")],
-        ]
-    )
-    await update.message.reply_text(WELCOME, reply_markup=kb)
+    await update.message.reply_text(WELCOME, reply_markup=main_menu_markup())
 
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    if query.data == "help":
-        await query.message.reply_text(INSTRUCTIONS)
-        return
-    if query.data != "apk":
-        return
-    stats = load_stats()
-    stats["downloads"] += 1
-    save_stats(stats)
     try:
+        if query.data == "help":
+            await query.message.delete()
+            await query.message.reply_text(INSTRUCTIONS, reply_markup=back_markup())
+            return
+        if query.data == "back":
+            await query.message.delete()
+            await query.message.reply_text(WELCOME, reply_markup=main_menu_markup())
+            return
+        if query.data != "apk":
+            return
+        stats = load_stats()
+        stats["downloads"] += 1
+        save_stats(stats)
+        await query.message.delete()
         data = ensure_apk()
         if data is not None:
             await query.message.reply_document(
                 document=InputFile(io.BytesIO(data), filename=APK_FILENAME),
                 caption=APK_CAPTION,
+                reply_markup=back_markup(),
             )
             return
         try:
             # Фолбэк: Telegram сам скачает файл по URL.
-            await query.message.reply_document(document=APK_URL, caption=APK_CAPTION)
+            await query.message.reply_document(
+                document=APK_URL, caption=APK_CAPTION, reply_markup=back_markup()
+            )
             return
         except Exception:  # noqa: BLE001
             logging.exception("Отправка по URL не удалась")
         await query.message.reply_text(
-            "⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL
+            "⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL,
+            reply_markup=back_markup(),
         )
     except Exception:  # noqa: BLE001
-        logging.exception("Ошибка отправки APK")
-        try:
-            await query.message.reply_text(
-                "⚠️ Ошибка отправки файла. Скачайте APK напрямую:\n\n" + APK_URL
-            )
-        except Exception:  # noqa: BLE001
-            pass
+        logging.exception("Ошибка в обработчике кнопок")
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
