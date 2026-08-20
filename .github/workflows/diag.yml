@@ -24,3 +24,10 @@ jobs:
         run: |
           curl -sS -m 180 "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendDocument?chat_id=${{ inputs.chat_id }}&document=https://github.com/PaulAndGit/blip-policy/releases/download/v1.0/blip-vpn-1.0-arm64.apk"
           echo
+      - name: Скачать APK и отправить загрузкой файла (как новый бот)
+        if: inputs.chat_id != ''
+        run: |
+          curl -sSL -m 120 -o blip.apk "https://github.com/PaulAndGit/blip-policy/releases/download/v1.0/blip-vpn-1.0-arm64.apk"
+          ls -la blip.apk
+          curl -sS -m 180 -F "chat_id=${{ inputs.chat_id }}" -F "document=@blip.apk" -F "caption=Тест: отправка APK загрузкой файла" "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendDocument"
+          echo
