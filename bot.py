@@ -23,6 +23,7 @@ APK_FILENAME = "blip-vpn-1.2-arm64.apk"
 DATA_FILE = Path("data.json")
 
 _APK_BYTES: bytes | None = None
+_APK_URL_CACHED: str | None = None
 _APK_LOCK = threading.Lock()
 
 INSTRUCTIONS = """📲 Как установить Blip VPN
@@ -73,13 +74,14 @@ def back_markup() -> InlineKeyboardMarkup:
 def download_apk() -> bytes | None:
     """Скачивает APK в память. None — если не получилось."""
     try:
+        logging.info("APK download start: %s", APK_URL)
         req = urllib.request.Request(APK_URL, headers={"User-Agent": "BlipBot/1.0"})
         with urllib.request.urlopen(req, timeout=30) as r:
             data = r.read()
         if not data.startswith(b"PK"):
             logging.error("APK: ответ не похож на zip (%d байт)", len(data))
             return None
-        logging.info("APK скачан: %d байт", len(data))
+        logging.info("APK скачан: %d байт from %s", len(data), APK_URL)
         return data
     except Exception as e:  # noqa: BLE001
         logging.error("APK не скачан: %s", e)
@@ -87,13 +89,17 @@ def download_apk() -> bytes | None:
 
 
 def ensure_apk() -> bytes | None:
-    """Возвращает байты APK, скачивая при необходимости."""
-    global _APK_BYTES
-    if _APK_BYTES is not None:
+    """Возвращает байты APK, скачивая при необходимости. Инвалидирует кэш при смене URL."""
+    global _APK_BYTES, _APK_URL_CACHED
+    if _APK_BYTES is not None and _APK_URL_CACHED == APK_URL:
         return _APK_BYTES
     with _APK_LOCK:
-        if _APK_BYTES is None:
-            _APK_BYTES = download_apk()
+        if _APK_BYTES is None or _APK_URL_CACHED != APK_URL:
+            logging.info("APK cache miss: cached=%s current=%s", _APK_URL_CACHED, APK_URL)
+            data = download_apk()
+            if data is not None:
+                _APK_BYTES = data
+                _APK_URL_CACHED = APK_URL
     return _APK_BYTES
 
 
