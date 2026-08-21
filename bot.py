@@ -167,6 +167,52 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Всего скачиваний: {s['downloads']}")
 
 
+def _latest_version() -> str | None:
+    """Текущая версия с GitHub Releases (tag без 'v'). None при ошибке."""
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/PaulAndGit/blip-policy/releases/latest",
+            headers={"User-Agent": "BlipBot/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read())
+        tag = data.get("tag_name", "")
+        return tag.removeprefix("v") or None
+    except Exception as e:  # noqa: BLE001
+        logging.error("latest version: %s", e)
+        return None
+
+
+def _parse_ver(v: str) -> list[int]:
+    return [int(x) for x in v.strip().removeprefix("v").split(".") if x.isdigit()]
+
+
+async def version_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/version 1.2 — сравнить установленную версию с последней на GitHub."""
+    installed = context.args[0].strip() if context.args else ""
+    latest = _latest_version()
+    if latest is None:
+        await update.message.reply_text("⚠️ Не удалось узнать последнюю версию. Попробуйте позже.")
+        return
+    if not installed:
+        await update.message.reply_text(
+            f"Последняя версия: v{latest}\n\n"
+            "Пришлите свою версию так: /version 1.2 — я скажу, нужно ли обновляться."
+        )
+        return
+    try:
+        if _parse_ver(installed) < _parse_ver(latest):
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("📦 Скачать APK", callback_data="apk")]])
+            await update.message.reply_text(
+                f"⬆️ Доступно обновление: v{installed} → v{latest}\nНажмите «Скачать APK».",
+                reply_markup=kb,
+            )
+        else:
+            await update.message.reply_text(f"✅ У вас последняя версия (v{installed}).")
+    except ValueError:
+        await update.message.reply_text("Не понял версию. Формат: /version 1.2")
+
+
 class _Health(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         self.send_response(200)
@@ -193,6 +239,7 @@ def main() -> None:
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("version", version_cmd))
     app.add_handler(CallbackQueryHandler(button))
     logging.info("Бот запущен")
     app.run_polling()
