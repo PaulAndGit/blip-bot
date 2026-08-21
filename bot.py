@@ -17,9 +17,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # Ссылка на arm64-версию APK (GitHub Release).
 APK_URL = os.environ.get(
     "APK_URL",
-    "https://github.com/PaulAndGit/blip-policy/releases/download/v1.2/blip-vpn-1.2-arm64.apk",
+    "https://github.com/PaulAndGit/blip-policy/releases/download/v1.2.1/blip-vpn-1.2.1-arm64.apk",
 )
-APK_FILENAME = "blip-vpn-1.2-arm64.apk"
+APK_FILENAME = "blip-vpn-1.2.1-arm64.apk"
 DATA_FILE = Path("data.json")
 
 _APK_BYTES: bytes | None = None
@@ -47,13 +47,13 @@ WELCOME = """👋 Привет! Это официальный бот Blip VPN.
 
 Выберите действие ниже:"""
 
-APK_CAPTION = """📦 Blip VPN v1.2
+APK_CAPTION = """📦 Blip VPN v1.2.1
 
 Версия для современных устройств (64-бит, Android 7+). Установка поверх — обновляет существующую.
 
 🆕 Что нового в приложении:
-• Проверка обновлений (GitHub / бот) и окно «Что нового» при первом запуске
-• Все флаги + иконка сети, авто-обновление подписки и дата день/месяц/год
+• Kill Switch — блокировка интернета при обрыве туннеля
+• Обновление изнутри приложения: «Проверить обновление» → скачать и установить без браузера
 
 Подробная инструкция — в разделе «Инструкция»."""
 
