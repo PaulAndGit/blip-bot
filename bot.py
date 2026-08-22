@@ -136,20 +136,22 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
         stats = load_stats()
         stats["downloads"] = stats.get("downloads", 0) + 1
+        total = stats["downloads"]
         save_stats(stats)
         await query.message.delete()
+        caption = f"{APK_CAPTION}\n\n📥 Скачиваний всего: {total}"
         data = ensure_apk()
         if data is not None:
             await query.message.reply_document(
                 document=InputFile(io.BytesIO(data), filename=APK_FILENAME),
-                caption=APK_CAPTION,
+                caption=caption,
                 reply_markup=back_markup(),
             )
             return
         try:
             # Фолбэк: Telegram сам скачает файл по URL.
             await query.message.reply_document(
-                document=APK_URL, caption=APK_CAPTION, reply_markup=back_markup()
+                document=APK_URL, caption=caption, reply_markup=back_markup()
             )
             return
         except Exception:  # noqa: BLE001
