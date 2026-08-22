@@ -109,11 +109,23 @@ def load_stats() -> dict:
             return json.loads(DATA_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
-    return {"downloads": 0}
+    return {"downloads": 0, "users": {}}
 
 
 def save_stats(stats: dict) -> None:
-    DATA_FILE.write_text(json.dumps(stats), encoding="utf-8")
+    DATA_FILE.write_text(json.dumps(stats, ensure_ascii=False), encoding="utf-8")
+
+
+def count_download(query) -> None:
+    """+1 скачивание; запоминаем пользователя (id + имя) и версию."""
+    stats = load_stats()
+    stats["downloads"] = stats.get("downloads", 0) + 1
+    users = stats.setdefault("users", {})
+    uid = str(query.from_user.id)
+    entry = users.setdefault(uid, {"name": query.from_user.first_name or "", "count": 0})
+    entry["count"] += 1
+    entry["name"] = query.from_user.first_name or entry["name"]
+    save_stats(stats)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -134,22 +146,22 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
         if query.data != "apk":
             return
-        stats = load_stats()
-        stats["downloads"] += 1
-        save_stats(stats)
+        count_download(query)
         await query.message.delete()
         data = ensure_apk()
         if data is not None:
             await query.message.reply_document(
                 document=InputFile(io.BytesIO(data), filename=APK_FILENAME),
                 caption=APK_CAPTION,
+                # Не сжимать: Telegram может перекодировать файл как медиа и ломает APK
+                force_document=True,
                 reply_markup=back_markup(),
             )
             return
         try:
             # Фолбэк: Telegram сам скачает файл по URL.
             await query.message.reply_document(
-                document=APK_URL, caption=APK_CAPTION, reply_markup=back_markup()
+                document=APK_URL, caption=APK_CAPTION, force_document=True, reply_markup=back_markup()
             )
             return
         except Exception:  # noqa: BLE001
@@ -164,7 +176,14 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     s = load_stats()
-    await update.message.reply_text(f"Всего скачиваний: {s['downloads']}")
+    total = s.get("downloads", 0)
+    users: dict = s.get("users", {})
+    lines = [f"📦 Всего скачиваний: {total}", f"👥 Пользователей: {len(users)}", ""]
+    for uid, u in sorted(users.items(), key=lambda kv: -kv[1].get("count", 0))[:15]:
+        lines.append(f"• {u.get('name') or 'Без имени'} — {u.get('count', 0)}")
+    if len(users) > 15:
+        lines.append(f"… и ещё {len(users) - 15}")
+    await update.message.reply_text("\n".join(lines))
 
 
 def _latest_version() -> str | None:
