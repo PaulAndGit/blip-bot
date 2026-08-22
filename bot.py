@@ -161,13 +161,13 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     chat_id=query.message.chat_id, document=APK_URL, caption=caption, reply_markup=back_markup()
                 )
                 return
-        except Exception:  # noqa: BLE001
-            logging.exception("Отправка по URL не удалась")
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL,
-            reply_markup=back_markup(),
-        )
+            except Exception:  # noqa: BLE001
+                logging.exception("Отправка по URL не удалась")
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL,
+                reply_markup=back_markup(),
+            )
     except Exception:  # noqa: BLE001
         logging.exception("Ошибка в обработчике кнопок")
 
@@ -196,11 +196,6 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(INSTRUCTIONS, reply_markup=back_markup())
     else:
         await update.message.reply_text(WELCOME, reply_markup=main_menu_markup())
-
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    s = load_stats()
-    await update.message.reply_text(f"📦 Всего скачиваний: {s.get('downloads', 0)}")
 
 
 def _latest_version() -> str | None:
