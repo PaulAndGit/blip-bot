@@ -9,8 +9,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -56,6 +56,13 @@ APK_CAPTION = """📦 Blip VPN v1.2.1
 • Обновление изнутри приложения: «Проверить обновление» → скачать и установить без браузера
 
 Подробная инструкция — в разделе «Инструкция»."""
+
+
+def reply_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("📦 Скачать APK")], [KeyboardButton("📋 Инструкция")]],
+        resize_keyboard=True, is_persistent=True,
+    )
 
 
 def main_menu_markup() -> InlineKeyboardMarkup:
@@ -117,7 +124,8 @@ def save_stats(stats: dict) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(WELCOME, reply_markup=main_menu_markup())
+    await update.message.reply_text(WELCOME, reply_markup=reply_keyboard())
+    await update.message.reply_text("Выберите действие:", reply_markup=main_menu_markup())
 
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -132,36 +140,62 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await query.message.delete()
             await query.message.reply_text(WELCOME, reply_markup=main_menu_markup())
             return
-        if query.data != "apk":
-            return
-        stats = load_stats()
-        stats["downloads"] = stats.get("downloads", 0) + 1
-        total = stats["downloads"]
-        save_stats(stats)
-        await query.message.delete()
-        caption = f"{APK_CAPTION}\n\n📥 Скачиваний всего: {total}"
-        data = ensure_apk()
-        if data is not None:
-            await query.message.reply_document(
-                document=InputFile(io.BytesIO(data), filename=APK_FILENAME),
-                caption=caption,
-                reply_markup=back_markup(),
-            )
-            return
-        try:
-            # Фолбэк: Telegram сам скачает файл по URL.
-            await query.message.reply_document(
-                document=APK_URL, caption=caption, reply_markup=back_markup()
-            )
-            return
+        if query.data == "apk":
+            stats = load_stats()
+            stats["downloads"] = stats.get("downloads", 0) + 1
+            total = stats["downloads"]
+            save_stats(stats)
+            await query.message.delete()
+            caption = f"{APK_CAPTION}\n\n📥 Скачиваний всего: {total}"
+            data = ensure_apk()
+            if data is not None:
+                await context.bot.send_document(
+                    chat_id=query.message.chat_id,
+                    document=InputFile(io.BytesIO(data), filename=APK_FILENAME),
+                    caption=caption,
+                    reply_markup=back_markup(),
+                )
+                return
+            try:
+                await context.bot.send_document(
+                    chat_id=query.message.chat_id, document=APK_URL, caption=caption, reply_markup=back_markup()
+                )
+                return
         except Exception:  # noqa: BLE001
             logging.exception("Отправка по URL не удалась")
-        await query.message.reply_text(
-            "⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL,
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL,
             reply_markup=back_markup(),
         )
     except Exception:  # noqa: BLE001
         logging.exception("Ошибка в обработчике кнопок")
+
+
+async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = (update.message.text or "").strip()
+    if "Скачать" in text:
+        stats = load_stats()
+        stats["downloads"] = stats.get("downloads", 0) + 1
+        total = stats["downloads"]
+        save_stats(stats)
+        caption = f"{APK_CAPTION}\n\n📥 Скачиваний всего: {total}"
+        data = ensure_apk()
+        if data is not None:
+            await update.message.reply_document(
+                document=InputFile(io.BytesIO(data), filename=APK_FILENAME),
+                caption=caption,
+                reply_markup=back_markup(),
+            )
+        else:
+            await update.message.reply_text(
+                "⚠️ Не удалось отправить файл. Скачайте APK напрямую:\n\n" + APK_URL,
+                reply_markup=back_markup(),
+            )
+    elif "Инструкция" in text:
+        await update.message.reply_text(INSTRUCTIONS, reply_markup=back_markup())
+    else:
+        await update.message.reply_text(WELCOME, reply_markup=main_menu_markup())
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -240,7 +274,7 @@ def main() -> None:
     threading.Thread(target=ensure_apk, daemon=True).start()
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(CommandHandler("version", version_cmd))
     app.add_handler(CallbackQueryHandler(button))
     logging.info("Бот запущен")
